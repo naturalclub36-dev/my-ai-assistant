@@ -3,9 +3,5 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application android:theme="@style/AppTheme" android:label="My AI Assistant" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
-        <service android:name=".MyAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="false">
-            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
-            <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_config"/>
-        </service>
     </application>
 </manifest>
