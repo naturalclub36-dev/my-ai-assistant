@@ -20,6 +20,8 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import org.json.JSONObject;
+import org.json.JSONArray;
+import android.content.SharedPreferences;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -310,6 +312,8 @@ public class AssistantService extends Service {
 
                 JSONObject payload = new JSONObject();
                 payload.put("message", question);
+                JSONArray history = loadConversationHistory();
+                payload.put("history", history);
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream out = connection.getOutputStream()) {
                     out.write(body);
@@ -332,6 +336,7 @@ public class AssistantService extends Service {
                 JSONObject response = new JSONObject(responseText.toString());
                 String answer = response.optString("reply", "").trim();
                 if (answer.isEmpty()) throw new IllegalStateException("Empty AI reply");
+                saveConversationTurn(question, answer);
                 handler.post(() -> {
                     if (running) speak(answer);
                 });
@@ -343,6 +348,47 @@ public class AssistantService extends Service {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    private JSONArray loadConversationHistory() {
+        SharedPreferences prefs = getSharedPreferences("sundri_chat", MODE_PRIVATE);
+        String saved = prefs.getString("history", "[]");
+        try {
+            JSONArray history = new JSONArray(saved);
+            JSONArray recent = new JSONArray();
+            int start = Math.max(0, history.length() - 8);
+            for (int i = start; i < history.length(); i++) {
+                JSONObject item = history.optJSONObject(i);
+                if (item != null) recent.put(item);
+            }
+            return recent;
+        } catch (Exception ignored) {
+            return new JSONArray();
+        }
+    }
+
+    private void saveConversationTurn(String question, String answer) {
+        JSONArray history = loadConversationHistory();
+        try {
+            JSONObject user = new JSONObject();
+            user.put("role", "user");
+            user.put("content", question);
+            history.put(user);
+
+            JSONObject assistant = new JSONObject();
+            assistant.put("role", "assistant");
+            assistant.put("content", answer);
+            history.put(assistant);
+
+            JSONArray recent = new JSONArray();
+            int start = Math.max(0, history.length() - 8);
+            for (int i = start; i < history.length(); i++) {
+                JSONObject item = history.optJSONObject(i);
+                if (item != null) recent.put(item);
+            }
+            getSharedPreferences("sundri_chat", MODE_PRIVATE)
+                    .edit().putString("history", recent.toString()).apply();
+        } catch (Exception ignored) { }
     }
 
     private String knownAppPackage(String command) {
