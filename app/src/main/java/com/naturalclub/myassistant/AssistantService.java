@@ -115,7 +115,7 @@ public class AssistantService extends Service {
     private void processSpeech(String heard) {
         String text = heard == null ? "" : heard.toLowerCase(Locale.ROOT).trim();
         String clean = text.replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
-        boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ") || clean.startsWith("sundry") || clean.contains(" sundry ");
+        boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ") || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ") || clean.equals("sundari") || clean.startsWith("sundari ") || clean.contains(" sundari ") || clean.equals("sun dry") || clean.startsWith("sun dry ");
 
         if (!waitingForCommand && !wake) {
             restartSoon();
@@ -123,7 +123,7 @@ public class AssistantService extends Service {
         }
 
         if (wake) {
-            String command = clean.replaceFirst("^(sundri|sundry)\\s*", "").trim();
+            String command = clean.replaceFirst("^(sundri|sundry|sundari|sun dry)\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
                 speak("Ji, boliye.");
@@ -145,7 +145,7 @@ public class AssistantService extends Service {
 
     private void executeCommand(String command) {
         String c = command.toLowerCase(Locale.ROOT).trim();
-        c = c.replaceFirst("^(open|launch|start|use|go to)\\s+", "");
+        c = c.replaceFirst("^(open|launch|start|use|go to|please)\\s+", "");
         c = c.replaceFirst("\\s+(khol|kholo|open)$", "").trim();
         if (c.equals("whats app")) c = "whatsapp";
 
