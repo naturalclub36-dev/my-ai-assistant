@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.speech.RecognitionListener;
@@ -15,6 +16,7 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -45,7 +47,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            startVoiceActivityFallback();
+            startVoiceActivityFallback(true);
             return;
         }
         try {
@@ -61,12 +63,13 @@ public class MainActivity extends Activity {
                     if (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                         setStatus("I did not hear a command. Tap again and speak clearly.", false);
                     } else if (e == SpeechRecognizer.ERROR_NETWORK || e == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
-                        setStatus("Check internet and try again.", false);
+                        setStatus("Offline speech is not available. Trying online voice input…", false);
+                        startVoiceActivityFallback(false);
                     } else if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                         setStatus("Microphone permission is missing.", true);
                     } else {
                         setStatus("Voice service had a problem. Trying phone voice input…", false);
-                        startVoiceActivityFallback();
+                        startVoiceActivityFallback(false);
                     }
                 }
                 @Override public void onResults(Bundle r) { handleResults(r); }
@@ -79,23 +82,25 @@ public class MainActivity extends Activity {
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US");
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+            i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
             i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Say: Open WhatsApp");
             speechRecognizer.startListening(i);
         } catch (Exception e) {
-            startVoiceActivityFallback();
+            startVoiceActivityFallback(true);
         }
     }
 
-    private void startVoiceActivityFallback() {
+    private void startVoiceActivityFallback(boolean preferOffline) {
         try {
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-            i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your command");
+            i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline);
+            i.putExtra(RecognizerIntent.EXTRA_PROMPT, preferOffline ? "Speak your command (offline if supported)" : "Speak your command");
             startActivityForResult(i, VOICE_ACTIVITY_REQUEST);
         } catch (Exception e) {
-            setStatus("Voice input is not available. Install/update Google app, allow Microphone, then try again.", true);
+            setStatus("Voice input is not available. Install/update Google speech services and allow Microphone.", true);
         }
     }
 
@@ -126,16 +131,52 @@ public class MainActivity extends Activity {
     }
 
     private void handleCommand(String command) {
-        String c = command.replace("open ", "").replace("launch ", "").trim();
-        if (c.contains("whatsapp") || c.contains("whats app")) launchApp("com.whatsapp", "WhatsApp");
-        else if (c.contains("youtube") || c.contains("you tube")) launchApp("com.google.android.youtube", "YouTube");
-        else if (c.contains("chrome") || c.contains("browser")) launchApp("com.android.chrome", "Chrome");
-        else setStatus("Try: Open WhatsApp, Open YouTube, or Open Chrome.", false);
+        String c = command.toLowerCase(Locale.ROOT).trim();
+        c = c.replaceFirst("^(open|launch|start)\\s+", "");
+        c = c.replaceFirst("\\s+(khol|kholo|open)$", "").trim();
+        if (c.equals("whats app")) c = "whatsapp";
+
+        List<ResolveInfo> apps = getLaunchableApps();
+        String compact = normalize(c);
+        ResolveInfo best = null;
+        int bestScore = 0;
+
+        for (ResolveInfo info : apps) {
+            String label = info.loadLabel(getPackageManager()).toString();
+            String labelNorm = normalize(label);
+            String pkgNorm = normalize(info.activityInfo.packageName);
+            int score = 0;
+            if (labelNorm.equals(compact)) score = 100;
+            else if (!compact.isEmpty() && labelNorm.contains(compact)) score = 80;
+            else if (!compact.isEmpty() && compact.contains(labelNorm)) score = 70;
+            else if (!compact.isEmpty() && pkgNorm.contains(compact)) score = 60;
+            if (score > bestScore) { bestScore = score; best = info; }
+        }
+
+        if (best != null && bestScore >= 60) {
+            String name = best.loadLabel(getPackageManager()).toString();
+            launchResolvedApp(best, name);
+        } else {
+            setStatus("I heard: " + command + ". That app was not found. Say: Open + app name.", false);
+        }
     }
 
-    private void launchApp(String pkg, String name) {
-        Intent launch = getPackageManager().getLaunchIntentForPackage(pkg);
-        if (launch == null) { setStatus(name + " is not installed on this phone.", true); return; }
+    private List<ResolveInfo> getLaunchableApps() {
+        Intent launcher = new Intent(Intent.ACTION_MAIN);
+        launcher.addCategory(Intent.CATEGORY_LAUNCHER);
+        return getPackageManager().queryIntentActivities(launcher, PackageManager.MATCH_ALL);
+    }
+
+    private String normalize(String value) {
+        if (value == null) return "";
+        return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    private void launchResolvedApp(ResolveInfo info, String name) {
+        Intent launch = new Intent(Intent.ACTION_MAIN);
+        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+        launch.setPackage(info.activityInfo.packageName);
+        launch.setClassName(info.activityInfo.packageName, info.activityInfo.name);
         speak("Opening " + name);
         try { startActivity(launch); } catch (Exception e) { setStatus("Could not open " + name + ".", true); }
     }
