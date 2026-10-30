@@ -172,6 +172,10 @@ public class AssistantService extends Service {
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+            // Newer Google speech services can use these hints to detect/switch
+            // languages automatically. Older Android releases safely ignore them.
+            i.putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true);
+            i.putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", true);
             recognizer.startListening(i);
         } catch (Exception e) {
             destroyRecognizer();
