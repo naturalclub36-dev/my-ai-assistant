@@ -231,7 +231,7 @@ public class AssistantService extends Service {
     }
 
     private boolean containsUrduScript(String value) {
-        return value != null && value.matches("(?s).*[\\\\u0600-\\\\u06FF].*");
+        return value != null && value.matches("(?s).*[\\u0600-\\u06FF].*");
     }
 
     // Convert common Urdu-script speech results into stable command words.
