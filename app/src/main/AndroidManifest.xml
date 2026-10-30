@@ -1,11 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
 
     <queries>
         <package android:name="com.whatsapp"/>
         <package android:name="com.google.android.youtube"/>
         <package android:name="com.android.chrome"/>
+        <package android:name="com.google.android.googlequicksearchbox"/>
+        <package android:name="com.google.android.tts"/>
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
     </queries>
 
     <application android:theme="@style/AppTheme" android:label="My AI Assistant" android:allowBackup="false" android:supportsRtl="true">
