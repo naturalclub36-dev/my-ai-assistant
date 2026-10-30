@@ -4,13 +4,13 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.net.Uri;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -18,6 +18,8 @@ import java.util.ArrayList;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
+    private static final int MIC_REQUEST = 10;
+    private static final int VOICE_ACTIVITY_REQUEST = 20;
     private WebView web;
     private SpeechRecognizer speechRecognizer;
     private TextToSpeech tts;
@@ -38,16 +40,16 @@ public class MainActivity extends Activity {
 
     private void startVoiceOnUiThread() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 10);
-            setStatus("Microphone permission required. Allow it and I will start listening.", false);
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MIC_REQUEST);
+            setStatus("Allow Microphone, then I will listen.", false);
             return;
         }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            setStatus("Google speech recognition is unavailable. Tap Speech Setup below.", true);
+            startVoiceActivityFallback();
             return;
         }
         try {
-            if (speechRecognizer != null) { speechRecognizer.cancel(); speechRecognizer.destroy(); }
+            if (speechRecognizer != null) { speechRecognizer.cancel(); speechRecognizer.destroy(); speechRecognizer = null; }
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
             speechRecognizer.setRecognitionListener(new RecognitionListener() {
                 @Override public void onReadyForSpeech(Bundle p) { setStatus("Listening… speak now", false); }
@@ -56,27 +58,18 @@ public class MainActivity extends Activity {
                 @Override public void onBufferReceived(byte[] b) { }
                 @Override public void onEndOfSpeech() { setStatus("Processing…", false); }
                 @Override public void onError(int e) {
-                    String msg;
-                    switch (e) {
-                        case SpeechRecognizer.ERROR_AUDIO: msg = "Microphone audio error. Check microphone permission."; break;
-                        case SpeechRecognizer.ERROR_CLIENT: msg = "Voice service stopped. Tap Voice Command again."; break;
-                        case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: msg = "Microphone permission is missing."; break;
-                        case SpeechRecognizer.ERROR_NETWORK:
-                        case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: msg = "Internet/speech service error. Check Wi‑Fi or mobile data."; break;
-                        case SpeechRecognizer.ERROR_NO_MATCH: msg = "I did not understand. Say: Open WhatsApp."; break;
-                        case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: msg = "Voice service is busy. Tap again in a moment."; break;
-                        case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: msg = "I did not hear you. Tap and speak immediately."; break;
-                        default: msg = "Voice recognition error. Tap Voice Command again.";
+                    if (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        setStatus("I did not hear a command. Tap again and speak clearly.", false);
+                    } else if (e == SpeechRecognizer.ERROR_NETWORK || e == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
+                        setStatus("Check internet and try again.", false);
+                    } else if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                        setStatus("Microphone permission is missing.", true);
+                    } else {
+                        setStatus("Voice service had a problem. Trying phone voice input…", false);
+                        startVoiceActivityFallback();
                     }
-                    setStatus(msg, false);
                 }
-                @Override public void onResults(Bundle r) {
-                    ArrayList<String> matches = r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                    if (matches == null || matches.isEmpty()) { setStatus("No command recognized. Try again.", false); return; }
-                    String command = matches.get(0).toLowerCase(Locale.ROOT).trim();
-                    setStatus("Heard: " + command, false);
-                    handleCommand(command);
-                }
+                @Override public void onResults(Bundle r) { handleResults(r); }
                 @Override public void onPartialResults(Bundle p) { }
                 @Override public void onEvent(int e, Bundle p) { }
             });
@@ -84,11 +77,51 @@ public class MainActivity extends Activity {
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US");
-            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+            i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Say: Open WhatsApp");
             speechRecognizer.startListening(i);
         } catch (Exception e) {
-            setStatus("Could not start voice recognition. Use Speech Setup and try again.", true);
+            startVoiceActivityFallback();
+        }
+    }
+
+    private void startVoiceActivityFallback() {
+        try {
+            Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
+            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+            i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your command");
+            startActivityForResult(i, VOICE_ACTIVITY_REQUEST);
+        } catch (Exception e) {
+            setStatus("Voice input is not available. Install/update Google app, allow Microphone, then try again.", true);
+        }
+    }
+
+    private void handleResults(Bundle r) {
+        ArrayList<String> matches = r == null ? null : r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        if (matches == null || matches.isEmpty()) { setStatus("No command recognized. Try again.", false); return; }
+        handleRecognizedText(matches.get(0));
+    }
+
+    private void handleRecognizedText(String text) {
+        if (text == null || text.trim().isEmpty()) { setStatus("No command recognized. Try again.", false); return; }
+        String command = text.toLowerCase(Locale.ROOT).trim();
+        setStatus("Heard: " + command, false);
+        handleCommand(command);
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == VOICE_ACTIVITY_REQUEST) {
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                if (results != null && !results.isEmpty()) handleRecognizedText(results.get(0));
+                else setStatus("No command recognized. Try again.", false);
+            } else {
+                setStatus("Voice input cancelled. Tap Voice Command and speak.", false);
+            }
         }
     }
 
@@ -97,10 +130,7 @@ public class MainActivity extends Activity {
         if (c.contains("whatsapp") || c.contains("whats app")) launchApp("com.whatsapp", "WhatsApp");
         else if (c.contains("youtube") || c.contains("you tube")) launchApp("com.google.android.youtube", "YouTube");
         else if (c.contains("chrome") || c.contains("browser")) launchApp("com.android.chrome", "Chrome");
-        else if (c.contains("whatsapp kholo") || c.contains("whatsapp khol")) launchApp("com.whatsapp", "WhatsApp");
-        else if (c.contains("youtube kholo") || c.contains("youtube khol")) launchApp("com.google.android.youtube", "YouTube");
-        else if (c.contains("chrome kholo") || c.contains("chrome khol")) launchApp("com.android.chrome", "Chrome");
-        else { setStatus("I heard: " + command + ". Try WhatsApp, YouTube, or Chrome.", false); }
+        else setStatus("Try: Open WhatsApp, Open YouTube, or Open Chrome.", false);
     }
 
     private void launchApp(String pkg, String name) {
@@ -135,12 +165,10 @@ public class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == 10 && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == MIC_REQUEST && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
             setStatus("Microphone allowed. Listening…", false);
             startVoiceOnUiThread();
-        } else if (requestCode == 10) {
-            setStatus("Microphone permission was denied. Allow Microphone in Settings.", true);
-        }
+        } else if (requestCode == MIC_REQUEST) setStatus("Microphone permission denied. Allow it in Settings.", true);
     }
 
     @Override protected void onDestroy() {
