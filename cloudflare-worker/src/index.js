@@ -65,7 +65,9 @@ export default {
           ...history,
           { role: "user", content: message },
         ],
-        max_tokens: 420,\n        temperature: 0.35,\n        top_p: 0.9,
+        max_tokens: 420,
+        temperature: 0.35,
+        top_p: 0.9,
       });
 
       const reply = String(result && result.response || "").trim();
