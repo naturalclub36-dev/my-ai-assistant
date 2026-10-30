@@ -402,7 +402,7 @@ public class AssistantService extends Service {
 
     private void configureVoiceForText(String text) {
         if (tts == null) return;
-        boolean urduScript = text != null && text.matches("(?s).* [\\u0600-\\u06FF].*".trim());
+        boolean urduScript = text != null && text.matches("(?s).*[\\u0600-\\u06FF].*");
         Locale locale = urduScript ? new Locale("ur", "PK") : new Locale("en", "IN");
         int result = tts.setLanguage(locale);
         if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
