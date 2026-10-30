@@ -20,6 +20,8 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import org.json.JSONObject;
+import org.json.JSONArray;
+import android.content.SharedPreferences;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -135,9 +137,14 @@ public class AssistantService extends Service {
                 @Override public void onError(int error) {
                     handler.post(() -> {
                         destroyRecognizer();
-                        if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE && !useEnglishFallback) {
+                        if ((error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE || error == SpeechRecognizer.ERROR_NO_MATCH) && !useEnglishFallback) {
                             useEnglishFallback = true;
-                            updateNotification("Urdu speech pack unavailable; switching to English recognition.");
+                            updateNotification("Trying English / Roman Urdu recognition…");
+                            scheduleListening(700);
+                            return;
+                        } else if (error == SpeechRecognizer.ERROR_NO_MATCH && useEnglishFallback) {
+                            useEnglishFallback = false;
+                            updateNotification("Trying Urdu recognition…");
                             scheduleListening(700);
                             return;
                         }
@@ -156,8 +163,11 @@ public class AssistantService extends Service {
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     destroyRecognizer();
                     retryDelay = 1200;
-                    if (list != null && !list.isEmpty()) processSpeech(list.get(0));
-                    else scheduleListening(1200);
+                    if (list != null && !list.isEmpty()) {
+                        String recognized = list.get(0);
+                        useEnglishFallback = !containsUrduScript(recognized);
+                        processSpeech(recognized);
+                    } else scheduleListening(1200);
                 }
                 @Override public void onPartialResults(Bundle partialResults) { }
                 @Override public void onEvent(int eventType, Bundle params) { }
@@ -170,6 +180,10 @@ public class AssistantService extends Service {
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+            // Newer Google speech services can use these hints to detect/switch
+            // languages automatically. Older Android releases safely ignore them.
+            i.putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true);
+            i.putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", true);
             recognizer.startListening(i);
         } catch (Exception e) {
             destroyRecognizer();
@@ -188,9 +202,9 @@ public class AssistantService extends Service {
     }
 
     private void processSpeech(String heard) {
-        String text = heard == null ? "" : heard.toLowerCase(Locale.ROOT).trim();
+        String text = heard == null ? "" : heard.trim();
         text = translateUrduSpeech(text);
-        String clean = text.replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
+        String clean = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
         boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ")
                 || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ")
                 || clean.equals("sundari") || clean.startsWith("sundari ") || clean.contains(" sundari ")
@@ -200,7 +214,7 @@ public class AssistantService extends Service {
             return;
         }
         if (wake) {
-            String command = clean.replaceFirst("^(sundri|sundry|sundari|sun dry)\\s*", "").trim();
+            String command = text.replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sun\\s*dry)\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
                 speak("جی، بولیے۔");
@@ -212,8 +226,12 @@ public class AssistantService extends Service {
         }
         if (waitingForCommand) {
             waitingForCommand = false;
-            executeCommand(clean);
+            executeCommand(text);
         }
+    }
+
+    private boolean containsUrduScript(String value) {
+        return value != null && value.matches("(?s).*[\\u0600-\\u06FF].*");
     }
 
     // Convert common Urdu-script speech results into stable command words.
@@ -222,6 +240,7 @@ public class AssistantService extends Service {
         String[][] words = {
                 {"سنڈری", " sundri "}, {"سندری", " sundri "}, {"سندھری", " sundri "},
                 {"واٹس ایپ", " whatsapp "}, {"واٹسایپ", " whatsapp "}, {"واٹسآپ", " whatsapp "},
+                {"میسج", " message "}, {"پیغام", " paigham "}, {"بھیجو", " bhejo "},
                 {"یوٹیوب", " youtube "}, {"یو ٹیوب", " youtube "},
                 {"انسٹاگرام", " instagram "}, {"انسٹا گرام", " instagram "},
                 {"فیس بک", " facebook "}, {"فیس بک", " facebook "},
@@ -235,14 +254,18 @@ public class AssistantService extends Service {
 
     private void executeCommand(String command) {
         String c = command.toLowerCase(Locale.ROOT).trim();
-        c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri)\\s+", "");
-        c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|open|please)$", "").trim();
+        if (handleWhatsAppMessage(c)) return;
+        c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri|zara)\\s+", "");
+        c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|khol do|kholde|dikhao|chalao|chala do|lagao|open|please)$", "").trim();
         c = c.replace("whats app", "whatsapp").replace("what's app", "whatsapp");
         c = c.replace("insta gram", "instagram").replace("face book", "facebook");
         c = c.replace("google chrome", "chrome").replace("chrome browser", "chrome");
         c = c.replace("you tube", "youtube").replace("watsapp", "whatsapp")
                 .replace("whatapp", "whatsapp").replace("insta", "instagram")
                 .replace("fb", "facebook");
+        String knownPackage = knownAppPackage(c);
+        if (knownPackage != null && launchPackage(knownPackage, c)) return;
+
         List<ResolveInfo> apps = getLaunchableApps();
         String compact = normalize(c);
         ResolveInfo best = null;
@@ -307,6 +330,8 @@ public class AssistantService extends Service {
 
                 JSONObject payload = new JSONObject();
                 payload.put("message", question);
+                JSONArray history = loadConversationHistory();
+                payload.put("history", history);
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream out = connection.getOutputStream()) {
                     out.write(body);
@@ -329,6 +354,7 @@ public class AssistantService extends Service {
                 JSONObject response = new JSONObject(responseText.toString());
                 String answer = response.optString("reply", "").trim();
                 if (answer.isEmpty()) throw new IllegalStateException("Empty AI reply");
+                saveConversationTurn(question, answer);
                 handler.post(() -> {
                     if (running) speak(answer);
                 });
@@ -340,6 +366,117 @@ public class AssistantService extends Service {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    // Opens the Android share sheet with the dictated text. The user selects a
+    // WhatsApp contact and taps Send; Sundri never sends messages silently.
+    private boolean handleWhatsAppMessage(String command) {
+        boolean mentionsWhatsApp = command.contains("whatsapp") || command.contains("what's app")
+                || command.contains("watsapp") || command.contains("واٹس ایپ");
+        boolean asksToSend = command.contains("message") || command.contains("msg")
+                || command.contains("paigham") || command.contains("bhejo")
+                || command.contains("send") || command.contains("بھیجو")
+                || command.contains("پیغام");
+        if (!mentionsWhatsApp || !asksToSend) return false;
+
+        String message = command;
+        int marker = -1;
+        String[] markers = {"message", "msg", "paigham", "پیغام"};
+        for (String item : markers) {
+            int found = command.indexOf(item);
+            if (found >= 0 && (marker < 0 || found < marker)) marker = found + item.length();
+        }
+        if (marker >= 0) message = command.substring(marker).trim();
+        message = message.replaceFirst("(?i)^(bhejo|send|karo|likho)\\s*", "")
+                .replaceFirst("(?i)\\s+(bhejo|bhej do|send|send karo|please)$", "").trim();
+        if (message.isEmpty()) {
+            speak("Kis ko aur kya message bhejna hai? Message ke alfaaz bolo.");
+            return true;
+        }
+        try {
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("text/plain");
+            share.putExtra(Intent.EXTRA_TEXT, message);
+            share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent chooser = Intent.createChooser(share, "WhatsApp par message bhejne ke liye app chunein");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(chooser);
+            speak("Message tayyar hai. WhatsApp aur contact select karke Send daba dein.");
+        } catch (Exception e) {
+            speak("Message share nahi ho saka. WhatsApp install hai ya nahi check karein.");
+        }
+        return true;
+    }
+
+    private JSONArray loadConversationHistory() {
+        SharedPreferences prefs = getSharedPreferences("sundri_chat", MODE_PRIVATE);
+        String saved = prefs.getString("history", "[]");
+        try {
+            JSONArray history = new JSONArray(saved);
+            JSONArray recent = new JSONArray();
+            int start = Math.max(0, history.length() - 8);
+            for (int i = start; i < history.length(); i++) {
+                JSONObject item = history.optJSONObject(i);
+                if (item != null) recent.put(item);
+            }
+            return recent;
+        } catch (Exception ignored) {
+            return new JSONArray();
+        }
+    }
+
+    private void saveConversationTurn(String question, String answer) {
+        JSONArray history = loadConversationHistory();
+        try {
+            JSONObject user = new JSONObject();
+            user.put("role", "user");
+            user.put("content", question);
+            history.put(user);
+
+            JSONObject assistant = new JSONObject();
+            assistant.put("role", "assistant");
+            assistant.put("content", answer);
+            history.put(assistant);
+
+            JSONArray recent = new JSONArray();
+            int start = Math.max(0, history.length() - 8);
+            for (int i = start; i < history.length(); i++) {
+                JSONObject item = history.optJSONObject(i);
+                if (item != null) recent.put(item);
+            }
+            getSharedPreferences("sundri_chat", MODE_PRIVATE)
+                    .edit().putString("history", recent.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    private String knownAppPackage(String command) {
+        String c = normalize(command);
+        if (c.contains("whatsapp") || c.equals("wa") || c.contains("watsapp")) return "com.whatsapp";
+        if (c.contains("youtube") || c.equals("yt")) return "com.google.android.youtube";
+        if (c.contains("instagram") || c.equals("insta")) return "com.instagram.android";
+        if (c.contains("facebook") || c.equals("fb")) return "com.facebook.katana";
+        if (c.contains("chrome") || c.contains("browser")) return "com.android.chrome";
+        if (c.contains("googlemaps") || c.equals("maps") || c.equals("map")) return "com.google.android.apps.maps";
+        if (c.equals("camera") || c.contains("camer")) return "com.oppo.camera";
+        if (c.contains("playstore") || c.equals("store")) return "com.android.vending";
+        if (c.equals("gmail") || c.contains("email")) return "com.google.android.gm";
+        if (c.equals("settings")) return "com.android.settings";
+        if (c.equals("phone") || c.equals("dialer") || c.equals("call")) return "com.google.android.dialer";
+        if (c.equals("messages") || c.equals("sms")) return "com.google.android.apps.messaging";
+        return null;
+    }
+
+    private boolean launchPackage(String packageName, String spokenName) {
+        try {
+            Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
+            if (launch == null) return false;
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            startActivity(launch);
+            speak("جی، " + spokenName + " کھول رہی ہوں۔");
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private List<ResolveInfo> getLaunchableApps() {
@@ -367,11 +504,34 @@ public class AssistantService extends Service {
         } catch (Exception ignored) { }
     }
 
+    private void configureVoiceForText(String text) {
+        if (tts == null) return;
+        boolean urduScript = text != null && text.matches("(?s).*[\\u0600-\\u06FF].*");
+        Locale locale = urduScript ? new Locale("ur", "PK") : new Locale("en", "IN");
+        int result = tts.setLanguage(locale);
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts.setLanguage(urduScript ? new Locale("ur", "IN") : Locale.US);
+        }
+        try {
+            if (tts.getVoices() == null) return;
+            String language = urduScript ? "ur" : "en";
+            for (Voice voice : tts.getVoices()) {
+                String name = voice.getName().toLowerCase(Locale.ROOT);
+                if ((name.contains("female") || name.contains("woman")) &&
+                        voice.getLocale().getLanguage().equals(language)) {
+                    tts.setVoice(voice);
+                    return;
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+
     private void speak(String text) {
         if (tts == null || !running) {
             scheduleListening(300);
             return;
         }
+        configureVoiceForText(text);
         speaking = true;
         handler.removeCallbacks(listenRunnable);
         destroyRecognizer();
