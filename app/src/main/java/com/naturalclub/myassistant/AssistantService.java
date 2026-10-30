@@ -224,6 +224,7 @@ public class AssistantService extends Service {
         String[][] words = {
                 {"سنڈری", " sundri "}, {"سندری", " sundri "}, {"سندھری", " sundri "},
                 {"واٹس ایپ", " whatsapp "}, {"واٹسایپ", " whatsapp "}, {"واٹسآپ", " whatsapp "},
+                {"میسج", " message "}, {"پیغام", " paigham "}, {"بھیجو", " bhejo "},
                 {"یوٹیوب", " youtube "}, {"یو ٹیوب", " youtube "},
                 {"انسٹاگرام", " instagram "}, {"انسٹا گرام", " instagram "},
                 {"فیس بک", " facebook "}, {"فیس بک", " facebook "},
