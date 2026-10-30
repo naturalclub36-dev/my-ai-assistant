@@ -190,9 +190,9 @@ public class AssistantService extends Service {
     }
 
     private void processSpeech(String heard) {
-        String text = heard == null ? "" : heard.toLowerCase(Locale.ROOT).trim();
+        String text = heard == null ? "" : heard.trim();
         text = translateUrduSpeech(text);
-        String clean = text.replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
+        String clean = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
         boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ")
                 || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ")
                 || clean.equals("sundari") || clean.startsWith("sundari ") || clean.contains(" sundari ")
@@ -202,7 +202,7 @@ public class AssistantService extends Service {
             return;
         }
         if (wake) {
-            String command = clean.replaceFirst("^(sundri|sundry|sundari|sun dry)\\s*", "").trim();
+            String command = text.replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sun\\s*dry)\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
                 speak("جی، بولیے۔");
@@ -214,7 +214,7 @@ public class AssistantService extends Service {
         }
         if (waitingForCommand) {
             waitingForCommand = false;
-            executeCommand(clean);
+            executeCommand(text);
         }
     }
 
@@ -237,6 +237,7 @@ public class AssistantService extends Service {
 
     private void executeCommand(String command) {
         String c = command.toLowerCase(Locale.ROOT).trim();
+        if (handleWhatsAppMessage(c)) return;
         c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri|zara)\\s+", "");
         c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|khol do|kholde|dikhao|chalao|chala do|lagao|open|please)$", "").trim();
         c = c.replace("whats app", "whatsapp").replace("what's app", "whatsapp");
@@ -348,6 +349,46 @@ public class AssistantService extends Service {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    // Opens the Android share sheet with the dictated text. The user selects a
+    // WhatsApp contact and taps Send; Sundri never sends messages silently.
+    private boolean handleWhatsAppMessage(String command) {
+        boolean mentionsWhatsApp = command.contains("whatsapp") || command.contains("what's app")
+                || command.contains("watsapp") || command.contains("واٹس ایپ");
+        boolean asksToSend = command.contains("message") || command.contains("msg")
+                || command.contains("paigham") || command.contains("bhejo")
+                || command.contains("send") || command.contains("بھیجو")
+                || command.contains("پیغام");
+        if (!mentionsWhatsApp || !asksToSend) return false;
+
+        String message = command;
+        int marker = -1;
+        String[] markers = {"message", "msg", "paigham", "پیغام"};
+        for (String item : markers) {
+            int found = command.indexOf(item);
+            if (found >= 0 && (marker < 0 || found < marker)) marker = found + item.length();
+        }
+        if (marker >= 0) message = command.substring(marker).trim();
+        message = message.replaceFirst("(?i)^(bhejo|send|karo|likho)\\s*", "")
+                .replaceFirst("(?i)\\s+(bhejo|bhej do|send|send karo|please)$", "").trim();
+        if (message.isEmpty()) {
+            speak("Kis ko aur kya message bhejna hai? Message ke alfaaz bolo.");
+            return true;
+        }
+        try {
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("text/plain");
+            share.putExtra(Intent.EXTRA_TEXT, message);
+            share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent chooser = Intent.createChooser(share, "WhatsApp par message bhejne ke liye app chunein");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(chooser);
+            speak("Message tayyar hai. WhatsApp aur contact select karke Send daba dein.");
+        } catch (Exception e) {
+            speak("Message share nahi ho saka. WhatsApp install hai ya nahi check karein.");
+        }
+        return true;
     }
 
     private JSONArray loadConversationHistory() {
