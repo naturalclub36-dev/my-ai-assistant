@@ -19,6 +19,16 @@ import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
+import org.json.JSONObject;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import androidx.core.app.NotificationCompat;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +37,8 @@ import java.util.Locale;
 public class AssistantService extends Service {
     private static final String CHANNEL_ID = "sundri_assistant";
     private static final int NOTIFICATION_ID = 1001;
+    private static final String AI_ENDPOINT = "https://sundri-ai-brain.naturalclub36.workers.dev/chat";
+    private final ExecutorService aiExecutor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SpeechRecognizer recognizer;
     private TextToSpeech tts;
@@ -231,8 +243,66 @@ public class AssistantService extends Service {
                 speak("Maazrat, " + name + " nahi khul saka.");
             }
         } else {
-            speak("Maazrat, " + command + " app nahi mili. App ka naam dobara boliye.");
+            askSundriAI(command);
         }
+    }
+
+
+    private void askSundriAI(String question) {
+        if (question == null || question.trim().isEmpty()) {
+            speak("Ji, apna sawal dobara batayein.");
+            return;
+        }
+        speaking = true;
+        handler.removeCallbacks(listenRunnable);
+        destroyRecognizer();
+        updateNotification("Sundri is thinking…");
+        aiExecutor.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                URL url = new URL(AI_ENDPOINT);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(12000);
+                connection.setReadTimeout(25000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+
+                JSONObject payload = new JSONObject();
+                payload.put("message", question);
+                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+                try (OutputStream out = connection.getOutputStream()) {
+                    out.write(body);
+                }
+
+                int status = connection.getResponseCode();
+                InputStream stream = status >= 200 && status < 300
+                        ? connection.getInputStream() : connection.getErrorStream();
+                StringBuilder responseText = new StringBuilder();
+                if (stream != null) {
+                    try (BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) responseText.append(line);
+                    }
+                }
+                if (status < 200 || status >= 300) {
+                    throw new IllegalStateException("AI server returned " + status);
+                }
+                JSONObject response = new JSONObject(responseText.toString());
+                String answer = response.optString("reply", "").trim();
+                if (answer.isEmpty()) throw new IllegalStateException("Empty AI reply");
+                handler.post(() -> {
+                    if (running) speak(answer);
+                });
+            } catch (Exception error) {
+                handler.post(() -> {
+                    if (running) speak("Maazrat, abhi AI se rabta nahi ho saka. Internet check karke dobara koshish karein.");
+                });
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
     }
 
     private List<ResolveInfo> getLaunchableApps() {
@@ -298,6 +368,7 @@ public class AssistantService extends Service {
         handler.removeCallbacksAndMessages(null);
         destroyRecognizer();
         if (tts != null) { tts.stop(); tts.shutdown(); }
+        aiExecutor.shutdownNow();
         super.onDestroy();
     }
 
