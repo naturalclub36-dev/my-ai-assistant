@@ -46,6 +46,7 @@ public class AssistantService extends Service {
     private boolean waitingForCommand;
     private boolean speaking;
     private int retryDelay = 700;
+    private boolean useEnglishFallback;
 
     private final Runnable listenRunnable = this::startListening;
 
@@ -134,6 +135,12 @@ public class AssistantService extends Service {
                 @Override public void onError(int error) {
                     handler.post(() -> {
                         destroyRecognizer();
+                        if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE && !useEnglishFallback) {
+                            useEnglishFallback = true;
+                            updateNotification("Urdu speech pack unavailable; switching to English recognition.");
+                            scheduleListening(700);
+                            return;
+                        }
                         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                             updateNotification("Microphone permission is missing. Open Sundri and allow Microphone.");
                             stopAssistant();
@@ -157,8 +164,9 @@ public class AssistantService extends Service {
             });
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ur-PK");
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ur-PK");
+            String speechLanguage = useEnglishFallback ? "en-IN" : "ur-PK";
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, speechLanguage);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, speechLanguage);
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
@@ -195,7 +203,7 @@ public class AssistantService extends Service {
             String command = clean.replaceFirst("^(sundri|sundry|sundari|sun dry)\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
-                speak("Ji, boliye.");
+                speak("جی، بولیے۔");
             } else {
                 waitingForCommand = false;
                 executeCommand(command);
@@ -217,7 +225,7 @@ public class AssistantService extends Service {
                 {"یوٹیوب", " youtube "}, {"یو ٹیوب", " youtube "},
                 {"انسٹاگرام", " instagram "}, {"انسٹا گرام", " instagram "},
                 {"فیس بک", " facebook "}, {"فیس بک", " facebook "},
-                {"کروم", " chrome "}, {"گوگل کروم", " chrome "},
+                {"گوگل کروم", " chrome "}, {"کروم", " chrome "},
                 {"کھول دو", " "}, {"کھولو", " "}, {"کھولیں", " "}, {"چلا دو", " "},
                 {"چلاؤ", " "}, {"اوپن کرو", " "}, {"اوپن", " "}
         };
@@ -267,9 +275,9 @@ public class AssistantService extends Service {
                 }
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 startActivity(launch);
-                speak("Ji, " + name + " khol rahi hoon.");
+                speak("جی، " + name + " کھول رہی ہوں۔");
             } catch (Exception e) {
-                speak("Maazrat, " + name + " nahi khul saka.");
+                speak("معذرت، " + name + " نہیں کھل سکا۔");
             }
         } else {
             askSundriAI(command);
@@ -279,7 +287,7 @@ public class AssistantService extends Service {
 
     private void askSundriAI(String question) {
         if (question == null || question.trim().isEmpty()) {
-            speak("Ji, apna sawal dobara batayein.");
+            speak("جی، اپنا سوال دوبارہ بتائیں۔");
             return;
         }
         speaking = true;
@@ -326,7 +334,7 @@ public class AssistantService extends Service {
                 });
             } catch (Exception error) {
                 handler.post(() -> {
-                    if (running) speak("Maazrat, abhi AI se rabta nahi ho saka. Internet check karke dobara koshish karein.");
+                    if (running) speak("معذرت، ابھی انٹرنیٹ سے رابطہ نہیں ہو سکا۔ دوبارہ کوشش کریں۔");
                 });
             } finally {
                 if (connection != null) connection.disconnect();
