@@ -54,9 +54,12 @@ public class AssistantService extends Service {
         createChannel();
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && tts != null) {
-                int language = tts.setLanguage(new Locale("en", "IN"));
+                int language = tts.setLanguage(new Locale("ur", "PK"));
                 if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    tts.setLanguage(Locale.US);
+                    language = tts.setLanguage(new Locale("ur", "IN"));
+                }
+                if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    tts.setLanguage(new Locale("en", "IN"));
                 }
                 chooseFemaleVoice();
                 tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
@@ -154,8 +157,8 @@ public class AssistantService extends Service {
             });
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN");
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN");
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ur-PK");
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ur-PK");
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
@@ -178,6 +181,7 @@ public class AssistantService extends Service {
 
     private void processSpeech(String heard) {
         String text = heard == null ? "" : heard.toLowerCase(Locale.ROOT).trim();
+        text = translateUrduSpeech(text);
         String clean = text.replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
         boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ")
                 || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ")
@@ -204,14 +208,33 @@ public class AssistantService extends Service {
         }
     }
 
+    // Convert common Urdu-script speech results into stable command words.
+    private String translateUrduSpeech(String value) {
+        String s = value;
+        String[][] words = {
+                {"سنڈری", " sundri "}, {"سندری", " sundri "}, {"سندھری", " sundri "},
+                {"واٹس ایپ", " whatsapp "}, {"واٹسایپ", " whatsapp "}, {"واٹسآپ", " whatsapp "},
+                {"یوٹیوب", " youtube "}, {"یو ٹیوب", " youtube "},
+                {"انسٹاگرام", " instagram "}, {"انسٹا گرام", " instagram "},
+                {"فیس بک", " facebook "}, {"فیس بک", " facebook "},
+                {"کروم", " chrome "}, {"گوگل کروم", " chrome "},
+                {"کھول دو", " "}, {"کھولو", " "}, {"کھولیں", " "}, {"چلا دو", " "},
+                {"چلاؤ", " "}, {"اوپن کرو", " "}, {"اوپن", " "}
+        };
+        for (String[] pair : words) s = s.replace(pair[0], pair[1]);
+        return s;
+    }
+
     private void executeCommand(String command) {
         String c = command.toLowerCase(Locale.ROOT).trim();
-        c = c.replaceFirst("^(open|launch|start|use|go to|please)\\s+", "");
-        c = c.replaceFirst("\\s+(khol|kholo|open)$", "").trim();
+        c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri)\\s+", "");
+        c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|open|please)$", "").trim();
         c = c.replace("whats app", "whatsapp").replace("what's app", "whatsapp");
         c = c.replace("insta gram", "instagram").replace("face book", "facebook");
         c = c.replace("google chrome", "chrome").replace("chrome browser", "chrome");
-        c = c.replace("you tube", "youtube");
+        c = c.replace("you tube", "youtube").replace("watsapp", "whatsapp")
+                .replace("whatapp", "whatsapp").replace("insta", "instagram")
+                .replace("fb", "facebook");
         List<ResolveInfo> apps = getLaunchableApps();
         String compact = normalize(c);
         ResolveInfo best = null;
@@ -221,10 +244,16 @@ public class AssistantService extends Service {
             String labelNorm = normalize(label);
             String pkgNorm = normalize(info.activityInfo.packageName);
             int score = 0;
-            if (labelNorm.equals(compact)) score = 100;
-            else if (!compact.isEmpty() && labelNorm.contains(compact)) score = 85;
-            else if (!compact.isEmpty() && compact.contains(labelNorm)) score = 75;
-            else if (!compact.isEmpty() && pkgNorm.contains(compact)) score = 65;
+            if (labelNorm.equals(compact)) score = 110;
+            else if (!compact.isEmpty() && pkgNorm.contains(compact)) score = 100;
+            else if (!compact.isEmpty() && labelNorm.contains(compact)) score = 90;
+            else if (!compact.isEmpty() && compact.contains(labelNorm) && labelNorm.length() >= 4) score = 75;
+            if (compact.equals("wa") || compact.equals("watsapp")) {
+                if (pkgNorm.contains("whatsapp")) score = 120;
+            }
+            if (compact.equals("yt") || compact.equals("youtub")) {
+                if (pkgNorm.contains("youtube")) score = 120;
+            }
             if (score > bestScore) { bestScore = score; best = info; }
         }
         if (best != null && bestScore >= 65) {
@@ -322,7 +351,7 @@ public class AssistantService extends Service {
             if (tts.getVoices() == null) return;
             for (Voice voice : tts.getVoices()) {
                 String n = voice.getName().toLowerCase(Locale.ROOT);
-                if ((n.contains("female") || n.contains("woman")) && voice.getLocale().getLanguage().equals("en")) {
+                if ((n.contains("female") || n.contains("woman")) && voice.getLocale().getLanguage().equals("ur")) {
                     tts.setVoice(voice);
                     return;
                 }
