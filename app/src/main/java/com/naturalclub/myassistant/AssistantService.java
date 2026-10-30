@@ -117,18 +117,25 @@ public class AssistantService extends Service {
                 @Override public void onBufferReceived(byte[] buffer) { }
                 @Override public void onEndOfSpeech() { }
                 @Override public void onError(int error) {
-                    destroyRecognizer();
-                    updateNotification("Speech paused (error " + error + "). Retrying…");
-                    scheduleListening(retryDelay);
-                    retryDelay = Math.min(retryDelay * 2, 5000);
+                    handler.post(() -> {
+                        destroyRecognizer();
+                        if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                            updateNotification("Microphone permission is missing. Open Sundri and allow Microphone.");
+                            stopAssistant();
+                            return;
+                        }
+                        updateNotification("Voice listening reconnecting…");
+                        long delay = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1800 : Math.max(1200, retryDelay);
+                        scheduleListening(delay);
+                        retryDelay = Math.min(Math.max(retryDelay, 1200) * 2, 8000);
+                    });
                 }
                 @Override public void onResults(Bundle results) {
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     destroyRecognizer();
-                    if (list != null && !list.isEmpty()) {
-                        retryDelay = 700;
-                        processSpeech(list.get(0));
-                    } else scheduleListening(700);
+                    retryDelay = 1200;
+                    if (list != null && !list.isEmpty()) processSpeech(list.get(0));
+                    else scheduleListening(1200);
                 }
                 @Override public void onPartialResults(Bundle partialResults) { }
                 @Override public void onEvent(int eventType, Bundle params) { }
@@ -191,6 +198,8 @@ public class AssistantService extends Service {
         c = c.replaceFirst("\\s+(khol|kholo|open)$", "").trim();
         c = c.replace("whats app", "whatsapp").replace("what's app", "whatsapp");
         c = c.replace("insta gram", "instagram").replace("face book", "facebook");
+        c = c.replace("google chrome", "chrome").replace("chrome browser", "chrome");
+        c = c.replace("you tube", "youtube");
         List<ResolveInfo> apps = getLaunchableApps();
         String compact = normalize(c);
         ResolveInfo best = null;
@@ -208,14 +217,16 @@ public class AssistantService extends Service {
         }
         if (best != null && bestScore >= 65) {
             String name = best.loadLabel(getPackageManager()).toString();
-            speak("Ji, " + name + " khol rahi hoon.");
             try {
-                Intent launch = new Intent(Intent.ACTION_MAIN);
-                launch.addCategory(Intent.CATEGORY_LAUNCHER);
-                launch.setPackage(best.activityInfo.packageName);
-                launch.setClassName(best.activityInfo.packageName, best.activityInfo.name);
+                Intent launch = getPackageManager().getLaunchIntentForPackage(best.activityInfo.packageName);
+                if (launch == null) {
+                    launch = new Intent(Intent.ACTION_MAIN);
+                    launch.addCategory(Intent.CATEGORY_LAUNCHER);
+                    launch.setClassName(best.activityInfo.packageName, best.activityInfo.name);
+                }
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 startActivity(launch);
+                speak("Ji, " + name + " khol rahi hoon.");
             } catch (Exception e) {
                 speak("Maazrat, " + name + " nahi khul saka.");
             }
