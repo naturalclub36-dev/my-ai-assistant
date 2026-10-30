@@ -87,7 +87,7 @@ public class AssistantService extends Service {
                 @Override public void onRmsChanged(float rmsdB) { }
                 @Override public void onBufferReceived(byte[] buffer) { }
                 @Override public void onEndOfSpeech() { }
-                @Override public void onError(int error) { restartSoon(); }
+                @Override public void onError(int error) {\n                    // Keep the foreground listener alive; online recognition is enabled below.\n                    restartSoon();\n                }
                 @Override public void onResults(Bundle results) {
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     if (list != null && !list.isEmpty()) processSpeech(list.get(0));
@@ -98,11 +98,11 @@ public class AssistantService extends Service {
             });
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US");
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN");
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN");
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
-            i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+            i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
             recognizer.startListening(i);
         } catch (Exception e) { restartSoon(); }
     }
