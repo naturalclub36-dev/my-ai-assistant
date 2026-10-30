@@ -10,11 +10,14 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import androidx.core.app.NotificationCompat;
 import java.util.ArrayList;
@@ -24,32 +27,43 @@ import java.util.Locale;
 public class AssistantService extends Service {
     private static final String CHANNEL_ID = "sundri_assistant";
     private static final int NOTIFICATION_ID = 1001;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private SpeechRecognizer recognizer;
     private TextToSpeech tts;
     private boolean running;
     private boolean waitingForCommand;
+    private boolean speaking;
+    private int retryDelay = 700;
+
+    private final Runnable listenRunnable = this::startListening;
 
     @Override public void onCreate() {
         super.onCreate();
         createChannel();
         tts = new TextToSpeech(this, status -> {
-            if (status == TextToSpeech.SUCCESS) {
-                tts.setLanguage(Locale.US);
+            if (status == TextToSpeech.SUCCESS && tts != null) {
+                int language = tts.setLanguage(new Locale("en", "IN"));
+                if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    tts.setLanguage(Locale.US);
+                }
                 chooseFemaleVoice();
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) { }
+                    @Override public void onDone(String id) { resumeAfterSpeech(); }
+                    @Override public void onError(String id) { resumeAfterSpeech(); }
+                });
             }
         });
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                stopSelf();
-                return START_NOT_STICKY;
-            }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            stopSelf();
+            return START_NOT_STICKY;
         }
-        startForeground(NOTIFICATION_ID, buildNotification());
+        startForeground(NOTIFICATION_ID, buildNotification("Starting voice recognition…"));
         running = true;
-        startListening();
+        scheduleListening(300);
         return START_STICKY;
     }
 
@@ -60,38 +74,61 @@ public class AssistantService extends Service {
         if (nm != null) nm.createNotificationChannel(channel);
     }
 
-    private Notification buildNotification() {
+    private Notification buildNotification(String message) {
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("Sundri is listening")
-                .setContentText("Say “Sundri” to wake your AI assistant")
+                .setContentTitle("Sundri is active")
+                .setContentText(message)
                 .setOngoing(true)
                 .setContentIntent(pi)
                 .build();
     }
 
+    private void updateNotification(String message) {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null && running) nm.notify(NOTIFICATION_ID, buildNotification(message));
+    }
+
+    private void scheduleListening(long delay) {
+        if (!running || speaking) return;
+        handler.removeCallbacks(listenRunnable);
+        handler.postDelayed(listenRunnable, delay);
+    }
+
     private void startListening() {
-        if (!running) return;
+        if (!running || speaking) return;
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            stopSelf();
+            updateNotification("Speech service unavailable. Check Google speech services.");
+            scheduleListening(5000);
             return;
         }
         try {
-            if (recognizer != null) { recognizer.cancel(); recognizer.destroy(); }
+            destroyRecognizer();
             recognizer = SpeechRecognizer.createSpeechRecognizer(this);
             recognizer.setRecognitionListener(new RecognitionListener() {
-                @Override public void onReadyForSpeech(Bundle params) { }
+                @Override public void onReadyForSpeech(Bundle params) {
+                    retryDelay = 700;
+                    updateNotification(waitingForCommand ? "Listening for your command…" : "Say “Sundri” to wake up");
+                }
                 @Override public void onBeginningOfSpeech() { }
                 @Override public void onRmsChanged(float rmsdB) { }
                 @Override public void onBufferReceived(byte[] buffer) { }
                 @Override public void onEndOfSpeech() { }
-                @Override public void onError(int error) { restartSoon(); }
+                @Override public void onError(int error) {
+                    destroyRecognizer();
+                    updateNotification("Speech paused (error " + error + "). Retrying…");
+                    scheduleListening(retryDelay);
+                    retryDelay = Math.min(retryDelay * 2, 5000);
+                }
                 @Override public void onResults(Bundle results) {
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                    if (list != null && !list.isEmpty()) processSpeech(list.get(0));
-                    else restartSoon();
+                    destroyRecognizer();
+                    if (list != null && !list.isEmpty()) {
+                        retryDelay = 700;
+                        processSpeech(list.get(0));
+                    } else scheduleListening(700);
                 }
                 @Override public void onPartialResults(Bundle partialResults) { }
                 @Override public void onEvent(int eventType, Bundle params) { }
@@ -100,46 +137,51 @@ public class AssistantService extends Service {
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN");
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN");
-            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
             recognizer.startListening(i);
-        } catch (Exception e) { restartSoon(); }
+        } catch (Exception e) {
+            destroyRecognizer();
+            updateNotification("Could not start microphone. Retrying…");
+            scheduleListening(retryDelay);
+            retryDelay = Math.min(retryDelay * 2, 5000);
+        }
     }
 
-    private void restartSoon() {
-        if (!running) return;
-        new android.os.Handler(getMainLooper()).postDelayed(this::startListening, 350);
+    private void destroyRecognizer() {
+        if (recognizer != null) {
+            try { recognizer.cancel(); } catch (Exception ignored) { }
+            try { recognizer.destroy(); } catch (Exception ignored) { }
+            recognizer = null;
+        }
     }
 
     private void processSpeech(String heard) {
         String text = heard == null ? "" : heard.toLowerCase(Locale.ROOT).trim();
         String clean = text.replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
-        boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ") || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ") || clean.equals("sundari") || clean.startsWith("sundari ") || clean.contains(" sundari ") || clean.equals("sun dry") || clean.startsWith("sun dry ");
-
+        boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ")
+                || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ")
+                || clean.equals("sundari") || clean.startsWith("sundari ") || clean.contains(" sundari ")
+                || clean.equals("sun dry") || clean.startsWith("sun dry ");
         if (!waitingForCommand && !wake) {
-            restartSoon();
+            scheduleListening(250);
             return;
         }
-
         if (wake) {
             String command = clean.replaceFirst("^(sundri|sundry|sundari|sun dry)\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
                 speak("Ji, boliye.");
-                restartSoon();
-                return;
+            } else {
+                waitingForCommand = false;
+                executeCommand(command);
             }
-            waitingForCommand = false;
-            executeCommand(command);
-            restartSoon();
             return;
         }
-
         if (waitingForCommand) {
             waitingForCommand = false;
             executeCommand(clean);
-            restartSoon();
         }
     }
 
@@ -147,8 +189,8 @@ public class AssistantService extends Service {
         String c = command.toLowerCase(Locale.ROOT).trim();
         c = c.replaceFirst("^(open|launch|start|use|go to|please)\\s+", "");
         c = c.replaceFirst("\\s+(khol|kholo|open)$", "").trim();
-        if (c.equals("whats app")) c = "whatsapp";
-
+        c = c.replace("whats app", "whatsapp").replace("what's app", "whatsapp");
+        c = c.replace("insta gram", "instagram").replace("face book", "facebook");
         List<ResolveInfo> apps = getLaunchableApps();
         String compact = normalize(c);
         ResolveInfo best = null;
@@ -159,14 +201,14 @@ public class AssistantService extends Service {
             String pkgNorm = normalize(info.activityInfo.packageName);
             int score = 0;
             if (labelNorm.equals(compact)) score = 100;
-            else if (!compact.isEmpty() && labelNorm.contains(compact)) score = 80;
-            else if (!compact.isEmpty() && compact.contains(labelNorm)) score = 70;
-            else if (!compact.isEmpty() && pkgNorm.contains(compact)) score = 60;
+            else if (!compact.isEmpty() && labelNorm.contains(compact)) score = 85;
+            else if (!compact.isEmpty() && compact.contains(labelNorm)) score = 75;
+            else if (!compact.isEmpty() && pkgNorm.contains(compact)) score = 65;
             if (score > bestScore) { bestScore = score; best = info; }
         }
-        if (best != null && bestScore >= 60) {
+        if (best != null && bestScore >= 65) {
             String name = best.loadLabel(getPackageManager()).toString();
-            speak("Opening " + name);
+            speak("Ji, " + name + " khol rahi hoon.");
             try {
                 Intent launch = new Intent(Intent.ACTION_MAIN);
                 launch.addCategory(Intent.CATEGORY_LAUNCHER);
@@ -174,9 +216,11 @@ public class AssistantService extends Service {
                 launch.setClassName(best.activityInfo.packageName, best.activityInfo.name);
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 startActivity(launch);
-            } catch (Exception e) { speak("I could not open " + name + "."); }
+            } catch (Exception e) {
+                speak("Maazrat, " + name + " nahi khul saka.");
+            }
         } else {
-            speak("Sorry, I could not find " + command + ".");
+            speak("Maazrat, " + command + " app nahi mili. App ka naam dobara boliye.");
         }
     }
 
@@ -194,9 +238,10 @@ public class AssistantService extends Service {
     private void chooseFemaleVoice() {
         if (tts == null) return;
         try {
+            if (tts.getVoices() == null) return;
             for (Voice voice : tts.getVoices()) {
                 String n = voice.getName().toLowerCase(Locale.ROOT);
-                if (n.contains("female") && voice.getLocale().getLanguage().equals("en")) {
+                if ((n.contains("female") || n.contains("woman")) && voice.getLocale().getLanguage().equals("en")) {
                     tts.setVoice(voice);
                     return;
                 }
@@ -205,20 +250,42 @@ public class AssistantService extends Service {
     }
 
     private void speak(String text) {
-        if (tts != null) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sundri");
+        if (tts == null || !running) {
+            scheduleListening(300);
+            return;
+        }
+        speaking = true;
+        handler.removeCallbacks(listenRunnable);
+        destroyRecognizer();
+        updateNotification("Sundri is replying…");
+        int result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sundri_reply");
+        if (result == TextToSpeech.ERROR) resumeAfterSpeech();
+    }
+
+    private void resumeAfterSpeech() {
+        handler.post(() -> {
+            speaking = false;
+            if (running) {
+                updateNotification(waitingForCommand ? "Listening for your command…" : "Say “Sundri” to wake up");
+                scheduleListening(500);
+            }
+        });
     }
 
     public void stopAssistant() {
         running = false;
         waitingForCommand = false;
-        if (recognizer != null) { recognizer.cancel(); recognizer.destroy(); recognizer = null; }
+        speaking = false;
+        handler.removeCallbacksAndMessages(null);
+        destroyRecognizer();
         stopForeground(true);
         stopSelf();
     }
 
     @Override public void onDestroy() {
         running = false;
-        if (recognizer != null) { recognizer.cancel(); recognizer.destroy(); }
+        handler.removeCallbacksAndMessages(null);
+        destroyRecognizer();
         if (tts != null) { tts.stop(); tts.shutdown(); }
         super.onDestroy();
     }
