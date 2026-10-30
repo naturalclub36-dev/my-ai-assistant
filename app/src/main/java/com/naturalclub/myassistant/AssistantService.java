@@ -235,14 +235,17 @@ public class AssistantService extends Service {
 
     private void executeCommand(String command) {
         String c = command.toLowerCase(Locale.ROOT).trim();
-        c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri)\\s+", "");
-        c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|open|please)$", "").trim();
+        c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri|zara)\\s+", "");
+        c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|khol do|kholde|dikhao|chalao|chala do|lagao|open|please)$", "").trim();
         c = c.replace("whats app", "whatsapp").replace("what's app", "whatsapp");
         c = c.replace("insta gram", "instagram").replace("face book", "facebook");
         c = c.replace("google chrome", "chrome").replace("chrome browser", "chrome");
         c = c.replace("you tube", "youtube").replace("watsapp", "whatsapp")
                 .replace("whatapp", "whatsapp").replace("insta", "instagram")
                 .replace("fb", "facebook");
+        String knownPackage = knownAppPackage(c);
+        if (knownPackage != null && launchPackage(knownPackage, c)) return;
+
         List<ResolveInfo> apps = getLaunchableApps();
         String compact = normalize(c);
         ResolveInfo best = null;
@@ -340,6 +343,36 @@ public class AssistantService extends Service {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    private String knownAppPackage(String command) {
+        String c = normalize(command);
+        if (c.contains("whatsapp") || c.equals("wa") || c.contains("watsapp")) return "com.whatsapp";
+        if (c.contains("youtube") || c.equals("yt")) return "com.google.android.youtube";
+        if (c.contains("instagram") || c.equals("insta")) return "com.instagram.android";
+        if (c.contains("facebook") || c.equals("fb")) return "com.facebook.katana";
+        if (c.contains("chrome") || c.contains("browser")) return "com.android.chrome";
+        if (c.contains("googlemaps") || c.equals("maps") || c.equals("map")) return "com.google.android.apps.maps";
+        if (c.equals("camera") || c.contains("camer")) return "com.oppo.camera";
+        if (c.contains("playstore") || c.equals("store")) return "com.android.vending";
+        if (c.equals("gmail") || c.contains("email")) return "com.google.android.gm";
+        if (c.equals("settings")) return "com.android.settings";
+        if (c.equals("phone") || c.equals("dialer") || c.equals("call")) return "com.google.android.dialer";
+        if (c.equals("messages") || c.equals("sms")) return "com.google.android.apps.messaging";
+        return null;
+    }
+
+    private boolean launchPackage(String packageName, String spokenName) {
+        try {
+            Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
+            if (launch == null) return false;
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            startActivity(launch);
+            speak("جی، " + spokenName + " کھول رہی ہوں۔");
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private List<ResolveInfo> getLaunchableApps() {
