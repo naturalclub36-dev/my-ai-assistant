@@ -400,11 +400,34 @@ public class AssistantService extends Service {
         } catch (Exception ignored) { }
     }
 
+    private void configureVoiceForText(String text) {
+        if (tts == null) return;
+        boolean urduScript = text != null && text.matches("(?s).* [\\u0600-\\u06FF].*".trim());
+        Locale locale = urduScript ? new Locale("ur", "PK") : new Locale("en", "IN");
+        int result = tts.setLanguage(locale);
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts.setLanguage(urduScript ? new Locale("ur", "IN") : Locale.US);
+        }
+        try {
+            if (tts.getVoices() == null) return;
+            String language = urduScript ? "ur" : "en";
+            for (Voice voice : tts.getVoices()) {
+                String name = voice.getName().toLowerCase(Locale.ROOT);
+                if ((name.contains("female") || name.contains("woman")) &&
+                        voice.getLocale().getLanguage().equals(language)) {
+                    tts.setVoice(voice);
+                    return;
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+
     private void speak(String text) {
         if (tts == null || !running) {
             scheduleListening(300);
             return;
         }
+        configureVoiceForText(text);
         speaking = true;
         handler.removeCallbacks(listenRunnable);
         destroyRecognizer();
