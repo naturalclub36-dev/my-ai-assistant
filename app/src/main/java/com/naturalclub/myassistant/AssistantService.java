@@ -87,7 +87,7 @@ public class AssistantService extends Service {
                 @Override public void onRmsChanged(float rmsdB) { }
                 @Override public void onBufferReceived(byte[] buffer) { }
                 @Override public void onEndOfSpeech() { }
-                @Override public void onError(int error) {\n                    // Keep the foreground listener alive; online recognition is enabled below.\n                    restartSoon();\n                }
+                @Override public void onError(int error) { restartSoon(); }
                 @Override public void onResults(Bundle results) {
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     if (list != null && !list.isEmpty()) processSpeech(list.get(0));
