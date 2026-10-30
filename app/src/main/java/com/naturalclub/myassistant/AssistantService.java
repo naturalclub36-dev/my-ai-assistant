@@ -137,9 +137,14 @@ public class AssistantService extends Service {
                 @Override public void onError(int error) {
                     handler.post(() -> {
                         destroyRecognizer();
-                        if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE && !useEnglishFallback) {
+                        if ((error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE || error == SpeechRecognizer.ERROR_NO_MATCH) && !useEnglishFallback) {
                             useEnglishFallback = true;
-                            updateNotification("Urdu speech pack unavailable; switching to English recognition.");
+                            updateNotification("Trying English / Roman Urdu recognition…");
+                            scheduleListening(700);
+                            return;
+                        } else if (error == SpeechRecognizer.ERROR_NO_MATCH && useEnglishFallback) {
+                            useEnglishFallback = false;
+                            updateNotification("Trying Urdu recognition…");
                             scheduleListening(700);
                             return;
                         }
@@ -158,8 +163,11 @@ public class AssistantService extends Service {
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     destroyRecognizer();
                     retryDelay = 1200;
-                    if (list != null && !list.isEmpty()) processSpeech(list.get(0));
-                    else scheduleListening(1200);
+                    if (list != null && !list.isEmpty()) {
+                        String recognized = list.get(0);
+                        useEnglishFallback = !containsUrduScript(recognized);
+                        processSpeech(recognized);
+                    } else scheduleListening(1200);
                 }
                 @Override public void onPartialResults(Bundle partialResults) { }
                 @Override public void onEvent(int eventType, Bundle params) { }
@@ -220,6 +228,10 @@ public class AssistantService extends Service {
             waitingForCommand = false;
             executeCommand(text);
         }
+    }
+
+    private boolean containsUrduScript(String value) {
+        return value != null && value.matches("(?s).*[\\\\u0600-\\\\u06FF].*");
     }
 
     // Convert common Urdu-script speech results into stable command words.
