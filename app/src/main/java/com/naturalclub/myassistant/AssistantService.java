@@ -220,7 +220,7 @@ public class AssistantService extends Service {
         }
         if (wake) {
             String command = text.replaceFirst("(?i)^\\s*(hey|hello|hi|ok|okay|please)\\s+", "")
-                    .replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sundree|sun\\s*dry)\\s*[,.:;!؟-]*\\s*", "").trim();
+                    .replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sundree|sun\\s*dry|ja?ag\\s+jao)\\s*[,.:;!؟-]*\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
                 useEnglishFallback = false;
