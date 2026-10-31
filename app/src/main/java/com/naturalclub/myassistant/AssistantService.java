@@ -166,10 +166,10 @@ public class AssistantService extends Service {
                     retryDelay = 1200;
                     if (list != null && !list.isEmpty()) {
                         String recognized = list.get(0);
-                        // Android 11 does not reliably support Google's newer
-                        // automatic language-switch extras. Alternate recognition
-                        // locales so the next utterance can switch languages.
-                        useEnglishFallback = !useEnglishFallback;
+                        // Choose the next recognizer locale from the script returned
+                        // by speech recognition. Urdu script stays on Urdu; Latin text
+                        // (English or Roman Urdu) uses English recognition.
+                        useEnglishFallback = !containsUrduScript(recognized);
                         processSpeech(recognized);
                     } else scheduleListening(1200);
                 }
@@ -218,6 +218,7 @@ public class AssistantService extends Service {
             String command = text.replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sun\\s*dry)\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
+                useEnglishFallback = false;
                 speak("جی، بولیے۔");
             } else {
                 waitingForCommand = false;
@@ -255,6 +256,13 @@ public class AssistantService extends Service {
 
     private void executeCommand(String command) {
         String c = command.toLowerCase(Locale.ROOT).trim();
+        String local = normalize(c);
+        if (local.equals("sojao") || local.equals("bandhojao") ||
+                local.equals("sundriband") || local.equals("stoplistening")) {
+            speak("ٹھیک ہے، میں سو رہی ہوں۔");
+            handler.postDelayed(this::stopAssistant, 2200);
+            return;
+        }
         if (handleWhatsAppMessage(c)) return;
         c = c.replaceFirst("^(open|launch|start|use|go to|please|sundri|zara)\\s+", "");
         c = c.replaceFirst("\\s+(khol|kholo|kholna|kholo na|khol do|kholde|dikhao|chalao|chala do|lagao|open|please)$", "").trim();
@@ -402,10 +410,16 @@ public class AssistantService extends Service {
             share.setType("text/plain");
             share.putExtra(Intent.EXTRA_TEXT, message);
             share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            Intent chooser = Intent.createChooser(share, "WhatsApp par message bhejne ke liye app chunein");
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(chooser);
-            speak("Message tayyar hai. WhatsApp aur contact select karke Send daba dein.");
+            share.setPackage("com.whatsapp");
+            try {
+                startActivity(share);
+            } catch (Exception whatsappUnavailable) {
+                share.setPackage(null);
+                Intent chooser = Intent.createChooser(share, "WhatsApp par message bhejne ke liye app chunein");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(chooser);
+            }
+            speak("Message tayyar hai. WhatsApp mein contact select karke Send daba dein.");
         } catch (Exception e) {
             speak("Message share nahi ho saka. WhatsApp install hai ya nahi check karein.");
         }
