@@ -35,6 +35,9 @@ import androidx.core.app.NotificationCompat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.TimeZone;
 
 public class AssistantService extends Service {
     private static final String CHANNEL_ID = "sundri_assistant";
@@ -137,20 +140,18 @@ public class AssistantService extends Service {
                 @Override public void onError(int error) {
                     handler.post(() -> {
                         destroyRecognizer();
-                        if ((error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE || error == SpeechRecognizer.ERROR_NO_MATCH) && !useEnglishFallback) {
-                            useEnglishFallback = true;
-                            updateNotification("Trying English / Roman Urdu recognition…");
-                            scheduleListening(700);
-                            return;
-                        } else if (error == SpeechRecognizer.ERROR_NO_MATCH && useEnglishFallback) {
-                            useEnglishFallback = false;
-                            updateNotification("Trying Urdu recognition…");
-                            scheduleListening(700);
-                            return;
-                        }
                         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                             updateNotification("Microphone permission is missing. Open Sundri and allow Microphone.");
                             stopAssistant();
+                            return;
+                        }
+                        if (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                                error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                            useEnglishFallback = !useEnglishFallback;
+                            updateNotification(useEnglishFallback
+                                    ? "Trying English / Roman Urdu recognition…"
+                                    : "Trying Urdu recognition…");
+                            scheduleListening(350);
                             return;
                         }
                         updateNotification("Voice listening reconnecting…");
@@ -165,7 +166,10 @@ public class AssistantService extends Service {
                     retryDelay = 1200;
                     if (list != null && !list.isEmpty()) {
                         String recognized = list.get(0);
-                        useEnglishFallback = !containsUrduScript(recognized);
+                        // Android 11 does not reliably support Google's newer
+                        // automatic language-switch extras. Alternate recognition
+                        // locales so the next utterance can switch languages.
+                        useEnglishFallback = !useEnglishFallback;
                         processSpeech(recognized);
                     } else scheduleListening(1200);
                 }
@@ -180,10 +184,7 @@ public class AssistantService extends Service {
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
             i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
-            // Newer Google speech services can use these hints to detect/switch
-            // languages automatically. Older Android releases safely ignore them.
-            i.putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true);
-            i.putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", true);
+            // Keep the recognizer request compatible with Android 11.
             recognizer.startListening(i);
         } catch (Exception e) {
             destroyRecognizer();
@@ -332,6 +333,9 @@ public class AssistantService extends Service {
                 payload.put("message", question);
                 JSONArray history = loadConversationHistory();
                 payload.put("history", history);
+                payload.put("now", new SimpleDateFormat(
+                        "yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).format(new Date()));
+                payload.put("timezone", TimeZone.getDefault().getID());
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream out = connection.getOutputStream()) {
                     out.write(body);
