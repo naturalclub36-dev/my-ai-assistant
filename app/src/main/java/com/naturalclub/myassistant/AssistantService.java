@@ -54,6 +54,9 @@ public class AssistantService extends Service {
     private boolean useEnglishFallback;
 
     private final Runnable listenRunnable = this::startListening;
+    // Some Android/OEM TTS engines occasionally fail to deliver onDone/onError.
+    // This watchdog prevents Sundri from remaining stuck in the replying state.
+    private final Runnable speechWatchdog = this::resumeAfterSpeech;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -72,6 +75,7 @@ public class AssistantService extends Service {
                     @Override public void onStart(String id) { }
                     @Override public void onDone(String id) { resumeAfterSpeech(); }
                     @Override public void onError(String id) { resumeAfterSpeech(); }
+                    @Override public void onStop(String id, boolean interrupted) { resumeAfterSpeech(); }
                 });
             }
         });
@@ -566,12 +570,17 @@ public class AssistantService extends Service {
         handler.removeCallbacks(listenRunnable);
         destroyRecognizer();
         updateNotification("Sundri is replying…");
+        handler.removeCallbacks(speechWatchdog);
+        // Fallback in case the device TTS engine never calls its completion callback.
+        long fallbackMs = Math.min(25000L, Math.max(6000L, text.length() * 220L));
+        handler.postDelayed(speechWatchdog, fallbackMs);
         int result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sundri_reply");
         if (result == TextToSpeech.ERROR) resumeAfterSpeech();
     }
 
     private void resumeAfterSpeech() {
         handler.post(() -> {
+            handler.removeCallbacks(speechWatchdog);
             speaking = false;
             if (running) {
                 updateNotification(waitingForCommand ? "Listening for your command…" : "Say “Sundri” to wake up");
