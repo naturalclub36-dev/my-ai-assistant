@@ -22,6 +22,16 @@ jobs:
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Validate Cloudflare Worker syntax
         run: node --check cloudflare-worker/src/index.js
+      - name: Smoke test deployed Sundri AI brain
+        shell: bash
+        run: |
+          health="$(curl --fail --silent --show-error https://sundri-ai-brain.naturalclub36.workers.dev/health)"
+          echo "$health" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(!x.ok||!x.ai_binding)process.exit(1);console.log("AI brain health OK")})'
+          reply="$(curl --fail --silent --show-error --max-time 45 \
+            -H "Content-Type: application/json" \
+            -d '{"message":"Reply briefly that Sundri is online."}' \
+            https://sundri-ai-brain.naturalclub36.workers.dev/chat)"
+          echo "$reply" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(!x.ok||!x.reply||!x.reply.trim())process.exit(1);console.log("AI chat smoke test OK")})'
       - name: Install Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
