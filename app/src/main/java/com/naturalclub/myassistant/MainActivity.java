@@ -57,9 +57,12 @@ public class MainActivity extends Activity {
     public void openSpeechSetup() {
         runOnUiThread(() -> {
             try {
-                Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                i.setData(Uri.parse("package:com.google.android.googlequicksearchbox"));
-                startActivity(i);
+                Intent i = new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS);
+                if (i.resolveActivity(getPackageManager()) != null) {
+                    startActivity(i);
+                } else {
+                    startActivity(new Intent(Settings.ACTION_SETTINGS));
+                }
             } catch (Exception e) {
                 try { startActivity(new Intent(Settings.ACTION_SETTINGS)); } catch (Exception ignored) { }
             }
