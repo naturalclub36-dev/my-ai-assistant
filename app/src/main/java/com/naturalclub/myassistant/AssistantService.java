@@ -206,16 +206,21 @@ public class AssistantService extends Service {
         String text = heard == null ? "" : heard.trim();
         text = translateUrduSpeech(text);
         String clean = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
-        boolean wake = clean.equals("sundri") || clean.startsWith("sundri ") || clean.contains(" sundri ")
-                || clean.equals("sundry") || clean.startsWith("sundry ") || clean.contains(" sundry ")
-                || clean.equals("sundari") || clean.startsWith("sundari ") || clean.contains(" sundari ")
-                || clean.equals("sun dry") || clean.startsWith("sun dry ");
+        String wakeProbe = clean.replaceAll("^(hey|hello|hi|ok|okay|please)\\s+", "");
+        boolean wake = wakeProbe.equals("sundri") || wakeProbe.startsWith("sundri ")
+                || wakeProbe.contains(" sundri ") || wakeProbe.equals("sundry")
+                || wakeProbe.startsWith("sundry ") || wakeProbe.contains(" sundry ")
+                || wakeProbe.equals("sundari") || wakeProbe.startsWith("sundari ")
+                || wakeProbe.contains(" sundari ") || wakeProbe.equals("sun dry")
+                || wakeProbe.startsWith("sun dry ") || wakeProbe.equals("sundree")
+                || wakeProbe.startsWith("sundree ");
         if (!waitingForCommand && !wake) {
             scheduleListening(250);
             return;
         }
         if (wake) {
-            String command = text.replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sun\\s*dry)\\s*", "").trim();
+            String command = text.replaceFirst("(?i)^\\s*(hey|hello|hi|ok|okay|please)\\s+", "")
+                    .replaceFirst("(?i)^\\s*(sundri|sundry|sundari|sundree|sun\\s*dry)\\s*[,.:;!؟-]*\\s*", "").trim();
             if (command.isEmpty()) {
                 waitingForCommand = true;
                 useEnglishFallback = false;
@@ -240,6 +245,8 @@ public class AssistantService extends Service {
     private String translateUrduSpeech(String value) {
         String s = value;
         String[][] words = {
+                {"سنڈری جاگ جاؤ", " sundri "}, {"سنڈری جاگو", " sundri "},
+                {"جاگ جاؤ", " sundri "}, {"جاگو", " sundri "},
                 {"سنڈری", " sundri "}, {"سندری", " sundri "}, {"سندھری", " sundri "},
                 {"واٹس ایپ", " whatsapp "}, {"واٹسایپ", " whatsapp "}, {"واٹسآپ", " whatsapp "},
                 {"میسج", " message "}, {"پیغام", " paigham "}, {"بھیجو", " bhejo "},
@@ -247,6 +254,9 @@ public class AssistantService extends Service {
                 {"انسٹاگرام", " instagram "}, {"انسٹا گرام", " instagram "},
                 {"فیس بک", " facebook "}, {"فیس بک", " facebook "},
                 {"گوگل کروم", " chrome "}, {"کروم", " chrome "},
+                {"ٹک ٹاک", " tiktok "}, {"اسپاٹیفائی", " spotify "},
+                {"نقشے", " maps "}, {"میپس", " maps "},
+                {"سیٹنگز", " settings "}, {"فون", " phone "}, {"کیمرہ", " camera "},
                 {"کھول دو", " "}, {"کھولو", " "}, {"کھولیں", " "}, {"چلا دو", " "},
                 {"چلاؤ", " "}, {"اوپن کرو", " "}, {"اوپن", " "}
         };
@@ -477,6 +487,8 @@ public class AssistantService extends Service {
         if (c.contains("googlemaps") || c.equals("maps") || c.equals("map")) return "com.google.android.apps.maps";
         if (c.equals("camera") || c.contains("camer")) return "com.oppo.camera";
         if (c.contains("playstore") || c.equals("store")) return "com.android.vending";
+        if (c.contains("tiktok")) return "com.zhiliaoapp.musically";
+        if (c.contains("spotify")) return "com.spotify.music";
         if (c.equals("gmail") || c.contains("email")) return "com.google.android.gm";
         if (c.equals("settings")) return "com.android.settings";
         if (c.equals("phone") || c.equals("dialer") || c.equals("call")) return "com.google.android.dialer";
