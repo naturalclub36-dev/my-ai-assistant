@@ -33,6 +33,17 @@ public class MainActivity extends Activity {
                 setStatus("Microphone permission required. Allow it first.", true);
                 return;
             }
+            if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+                try {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                    setStatus("Allow 'Display over other apps', then press Activate again.", false);
+                } catch (Exception e) {
+                    setStatus("Allow Display over other apps for Sundri.", false);
+                }
+                return;
+            }
             startAssistantService();
         });
     }
@@ -44,7 +55,7 @@ public class MainActivity extends Activity {
             else startService(i);
             setStatus("Sundri active — say “Sundri” anytime.", false);
         } catch (Exception e) {
-            setStatus("Could not start Sundri. Allow microphone and try again.", true);
+            setStatus("Could not start Sundri. Allow microphone and overlay permission.", true);
         }
     }
 
@@ -58,11 +69,8 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             try {
                 Intent i = new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS);
-                if (i.resolveActivity(getPackageManager()) != null) {
-                    startActivity(i);
-                } else {
-                    startActivity(new Intent(Settings.ACTION_SETTINGS));
-                }
+                if (i.resolveActivity(getPackageManager()) != null) startActivity(i);
+                else startActivity(new Intent(Settings.ACTION_SETTINGS));
             } catch (Exception e) {
                 try { startActivity(new Intent(Settings.ACTION_SETTINGS)); } catch (Exception ignored) { }
             }
@@ -79,7 +87,7 @@ public class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == MIC_REQUEST && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-            startAssistantService();
+            activateSundri();
         } else if (requestCode == MIC_REQUEST) {
             setStatus("Microphone permission denied. Allow Microphone in Settings.", true);
         }
